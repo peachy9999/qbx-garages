@@ -303,13 +303,9 @@ local function ParkOwnedVehicle(veh, garageName, vehLocation, plate)
     local bodyDamage = math.ceil(GetVehicleBodyHealth(veh))
     local engineDamage = math.ceil(GetVehicleEngineHealth(veh))
 
-    local totalFuel = 0
+    local totalFuel = Entity(veh).state.fuel
 
-    if Config.FuelScript then
-        totalFuel = exports[Config.FuelScript]:GetFuel(veh)
-    else
-        totalFuel = exports['LegacyFuel']:GetFuel(veh) -- Don't change this. Change it in the  Defaults to legacy fuel if not set in the config
-    end
+
 
     local canPark, closestLocation = CanParkVehicle(veh, garageName, vehLocation)
     local closestVec3 = closestLocation and vector3(closestLocation.x,closestLocation.y, closestLocation.z) or nil
@@ -460,15 +456,16 @@ function JobMenuGarage(garageName)
         return
     end
 
-    local vehicleMenu = {
-        id = 'qbx_jobVehicle_Menu',
-        title = jobGarage.label,
-        options = {}
-    }
-
-    local vehicles = jobGarage.vehicles[QBCore.Functions.GetPlayerData().job.grade.level]
+    local options = {}
+    local grade = QBCore.Functions.GetPlayerData().job.grade.level
+    local vehicles = nil
+    if #jobGarage.vehicles < grade then
+        vehicles = jobGarage.vehicles[#jobGarage.vehicles]
+    else
+        vehicles = jobGarage.vehicles[QBCore.Functions.GetPlayerData().job.grade.level]
+    end
     for veh, label in pairs(vehicles) do
-        vehicleMenu[#vehicleMenu+1] = {
+        options[#options+1] = {
             title = label,
             description = "",
             event = "qb-garages:client:TakeOutGarage",
@@ -478,7 +475,11 @@ function JobMenuGarage(garageName)
             }
         }
     end
-    lib.registerContext(vehicleMenu)
+    lib.registerContext({
+        id = 'qbx_jobVehicle_Menu',
+        title = jobGarage.label,
+        options = options
+    })
     lib.showContext('qbx_jobVehicle_Menu')
 end
 
@@ -563,11 +564,7 @@ end
 
 local function UpdateVehicleSpawnerSpawnedVehicle(veh, garage, heading, cb)
     local plate = QBCore.Functions.GetPlate(veh)
-    if Config.FuelScript then
-        exports[Config.FuelScript]:SetFuel(veh, 100)
-    else
-        exports['LegacyFuel']:SetFuel(veh, 100) -- Don't change this. Change it in the  Defaults to legacy fuel if not set in the config
-    end
+    Entity(veh).state.fuel = 100
     TriggerEvent("vehiclekeys:client:SetOwner", plate)
     TriggerServerEvent("qb-garage:server:UpdateSpawnedVehicle", plate, true)
 
@@ -579,7 +576,6 @@ local function UpdateVehicleSpawnerSpawnedVehicle(veh, garage, heading, cb)
     end
 
     SetAsMissionEntity(veh)
-    SetVehicleEngineOn(veh, true, true)
     if cb then cb(veh) end
 end
 
@@ -605,11 +601,7 @@ function UpdateSpawnedVehicle(spawnedVehicle, vehicleInfo, heading, garage, prop
             OutsideVehicles[plate] = spawnedVehicle
             TriggerServerEvent('qb-garages:server:UpdateOutsideVehicles', OutsideVehicles)
         end
-        if Config.FuelScript then
-            exports[Config.FuelScript]:SetFuel(spawnedVehicle, 100)
-        else
-            exports['LegacyFuel']:SetFuel(spawnedVehicle, 100) -- Don't change this. Change it in the  Defaults to legacy fuel if not set in the config
-        end
+        Entity(spawnedVehicle).state.fuel = 100
         TriggerEvent("vehiclekeys:client:SetOwner", plate)
         TriggerServerEvent("qb-garage:server:UpdateSpawnedVehicle", plate, true)
     else
@@ -617,11 +609,7 @@ function UpdateSpawnedVehicle(spawnedVehicle, vehicleInfo, heading, garage, prop
             OutsideVehicles[plate] = spawnedVehicle
             TriggerServerEvent('qb-garages:server:UpdateOutsideVehicles', OutsideVehicles)
         end
-        if Config.FuelScript then
-            exports[Config.FuelScript]:SetFuel(spawnedVehicle, vehicleInfo.fuel)
-        else
-            exports['LegacyFuel']:SetFuel(spawnedVehicle, vehicleInfo.fuel) -- Don't change this. Change it in the  Defaults to legacy fuel if not set in the config
-        end
+        Entity(spawnedVehicle).state.fuel = vehicleInfo.fuel
         QBCore.Functions.SetVehicleProperties(spawnedVehicle, properties)
         SetVehicleNumberPlateText(spawnedVehicle, vehicleInfo.plate)
         SetAsMissionEntity(spawnedVehicle)
@@ -878,6 +866,33 @@ RegisterNetEvent('QBCore:Client:OnJobUpdate', function(job)
     PlayerJob = job
 end)
 
+local function getVehicleFromVehList(hash)
+	for _, v in pairs(QBCore.Shared.Vehicles) do
+		if hash == v.hash then
+			return v.model
+		end
+	end
+end
+
+RegisterNetEvent('qb-admin:client:SaveCar', function()
+    local ped = PlayerPedId()
+    local veh = GetVehiclePedIsIn(ped)
+
+    if veh ~= nil and veh ~= 0 then
+        local plate = QBCore.Functions.GetPlate(veh)
+        local props = QBCore.Functions.GetVehicleProperties(veh)
+        local hash = props.model
+        local vehname = getVehicleFromVehList(hash)
+        if QBCore.Shared.Vehicles[vehname] ~= nil and next(QBCore.Shared.Vehicles[vehname]) ~= nil then
+            TriggerServerEvent('qb-admin:server:SaveCar', props, QBCore.Shared.Vehicles[vehname], GetHashKey(veh), plate)
+        else
+            QBCore.Functions.Notify("Can't save this vehicle!", 'error')
+        end
+    else
+        QBCore.Functions.Notify("You must be in a vehicle!", 'error')
+    end
+end)
+
 -- Threads
 
 CreateThread(function()
@@ -894,6 +909,7 @@ CreateThread(function()
             AddTextComponentSubstringPlayerName(Config.GarageNameAsBlipName and garage.label or garage.blipName)
             EndTextCommandSetBlipName(Garage)
         end
+
     end
 end)
 
